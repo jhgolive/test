@@ -22,27 +22,17 @@
 	};
 
 //데이터 저장/새로고침
-	var doubleClickFlag = false;
+	function autoSave() {  		
+		var arrin = [];
+		var length = table.getElementsByTagName('input').length + table.getElementsByTagName('textarea').length;
 
-	function autoSave() {
-		if(doubleClickFlag){
-			return;
-		}else{
-  		doubleClickFlag = true;
-  		
-  		var arrin = [];
-  		var length = table.getElementsByTagName('input').length + table.getElementsByTagName('textarea').length;
+		for(var i=0;i<length;i++) { 
+			var valnum = "val"+(i+1);
 
-			for(var i=0;i<length;i++) { 
-  			var valnum = "val"+(i+1);
- 	
- 	  		arrin[i] =	document.getElementById(valnum).value;
-			}
-			localStorage.setItem('autosaveContent', arrin);
-			location.reload(true);
-  		    		
-  		setTimeout("doubleClickFlag = false;", 3000); //더블클릭방지 3초
+  		arrin[i] =	document.getElementById(valnum).value;
 		}
+		localStorage.setItem('autosaveContent', arrin);
+		location.reload(true);
 	}
   
 //엔터로 실행
