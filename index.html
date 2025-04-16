@@ -22,17 +22,21 @@
 	};
 
 //데이터 저장/새로고침
-	function autoSave() {  		
-		var arrin = [];
-		var length = table.getElementsByTagName('input').length + table.getElementsByTagName('textarea').length;
-
-		for(var i=0;i<length;i++) { 
-			var valnum = "val"+(i+1);
-
-  		arrin[i] =	document.getElementById(valnum).value;
+	function autoSave() {  
+		if(confirm("데이터는 메모리에 저장되고 리소스만 초기화됩니다.")){		
+			var arrin = [];
+			var length = table.getElementsByTagName('input').length + table.getElementsByTagName('textarea').length;
+	
+			for(var i=0;i<length;i++) { 
+				var valnum = "val"+(i+1);
+	
+	  		arrin[i] =	document.getElementById(valnum).value;
+			}
+			localStorage.setItem('autosaveContent', arrin);
+			location.reload(true);
+		}else{
+			//취소
 		}
-		localStorage.setItem('autosaveContent', arrin);
-		location.reload(true);
 	}
   
 //엔터로 실행
@@ -127,7 +131,16 @@
  			document.getElementById('val14').value = "";
  			document.getElementById('val15').value = "";
  			
-			autoSave();
+			var arrin = [];
+			var length = table.getElementsByTagName('input').length + table.getElementsByTagName('textarea').length;
+	
+			for(var i=0;i<length;i++) { 
+				var valnum = "val"+(i+1);
+	
+	  		arrin[i] =	document.getElementById(valnum).value;
+			}
+			localStorage.setItem('autosaveContent', arrin);
+			location.reload(true);
  		}else{
  			//취소
  		}
