@@ -8,7 +8,6 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/12.1.0/firebase-app.js";
 import { getDatabase, ref, onValue, set } from "https://www.gstatic.com/firebasejs/12.1.0/firebase-database.js";
 
-// ====================== Firebase 설정 ======================
 const firebaseConfig = {
     apiKey: "AIzaSyAQGtOEcxFxl9FV7NASLgxLDc23u2vzS_0",
     authDomain: "mygps-11798.firebaseapp.com",
@@ -21,15 +20,93 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 const db = getDatabase(app);
 
-// ====================== 전역 변수 ======================
 let map, marker, destinationMarker;
 let addressDiv, distanceDiv;
 let geocoder, directionsService;
 let routePolyline = null;
-let clickTimeout = null; // 클릭/더블클릭 구분용
+let clickTimeout = null; // ✅ 클릭/더블클릭 구분용
 
-// ====================== 유틸 함수 ======================
-// 주소 단순화
+// ✅ 다크모드 스타일
+const darkModeStyle = [
+  { elementType: "geometry", stylers: [{ color: "#212121" }] },
+  { elementType: "labels.icon", stylers: [{ visibility: "off" }] },
+  { elementType: "labels.text.fill", stylers: [{ color: "#757575" }] },
+  { elementType: "labels.text.stroke", stylers: [{ color: "#212121" }] },
+  { featureType: "administrative", elementType: "geometry", stylers: [{ color: "#757575" }] },
+  { featureType: "poi", elementType: "geometry", stylers: [{ color: "#303030" }] },
+  { featureType: "poi.park", elementType: "geometry", stylers: [{ color: "#181818" }] },
+  { featureType: "road", elementType: "geometry.fill", stylers: [{ color: "#2c2c2c" }] },
+  { featureType: "road", elementType: "geometry.stroke", stylers: [{ color: "#1c1c1c" }] },
+  { featureType: "water", elementType: "geometry", stylers: [{ color: "#000000" }] }
+];
+
+// ✅ 내 위치 마커
+function createMarker(pos) {
+    if (marker) marker.setMap(null);
+    marker = new google.maps.Marker({
+        position: pos,
+        map: map,
+        icon: {
+            url: "data:image/svg+xml;utf-8," + encodeURIComponent(`
+                <svg xmlns="http://www.w3.org/2000/svg" width="30" height="40">
+                  <polygon points="12,10 18,10 25,15 15,40 5,15" fill="red"/>
+                </svg>`),
+            scaledSize: new google.maps.Size(30, 40)
+        }
+    });
+}
+
+// ✅ 목적지 마커
+function createDestinationMarker(pos) {
+    if (destinationMarker) destinationMarker.setMap(null);
+    destinationMarker = new google.maps.Marker({
+        position: pos,
+        map: map,
+        icon: {
+            url: "data:image/svg+xml;utf-8," + encodeURIComponent(`
+                <svg xmlns="http://www.w3.org/2000/svg" width="30" height="40">
+                  <polygon points="12,10 18,10 25,15 15,40 5,15" fill="blue"/>
+                </svg>`),
+            scaledSize: new google.maps.Size(30, 40)
+        }
+    });
+}
+
+// ✅ 주소 표시 div
+function createAddressDiv() {
+    if (!addressDiv) {
+        addressDiv = document.createElement("div");
+        addressDiv.style.fontSize = "20px";
+        addressDiv.style.fontWeight = "900";
+        addressDiv.style.padding = "0"; 
+        addressDiv.style.backgroundColor = "transparent"; 
+        addressDiv.style.color = "#000";
+        addressDiv.style.textAlign = "center"; 
+        addressDiv.style.width = "300px"; 
+        addressDiv.style.overflow = "hidden";    
+        addressDiv.style.whiteSpace = "nowrap";  
+        map.controls[google.maps.ControlPosition.TOP_CENTER].push(addressDiv);
+    }
+}
+
+// ✅ 거리 표시 div
+function createDistanceDiv() {
+    if (!distanceDiv) {
+        distanceDiv = document.createElement("div");
+        distanceDiv.style.fontSize = "16px";
+        distanceDiv.style.fontWeight = "bold";
+        distanceDiv.style.padding = "0"; 
+        distanceDiv.style.backgroundColor = "transparent"; 
+        distanceDiv.style.color = "#000";
+        distanceDiv.style.textAlign = "center";  
+        distanceDiv.style.width = "120px"; 
+        distanceDiv.style.overflow = "hidden";    
+        distanceDiv.style.whiteSpace = "nowrap";  
+        map.controls[google.maps.ControlPosition.BOTTOM_CENTER].push(distanceDiv);
+    }
+}
+
+// ✅ 주소 업데이트
 function simplifyName(name) {
     const map = {
         "서울특별시": "서울", "부산광역시": "부산", "대구광역시": "대구",
@@ -44,9 +121,7 @@ function simplifyName(name) {
     return name;
 }
 
-// 주소 업데이트
 function updateAddress(lat, lng) {
-    if (!geocoder || !addressDiv) return;
     const width = document.getElementById("map").offsetWidth;
     geocoder.geocode({ location: { lat, lng } }, (results, status) => {
         if (status === "OK" && results.length) {
@@ -68,9 +143,10 @@ function updateAddress(lat, lng) {
     });
 }
 
-// 거리 표시 업데이트
+// ✅ 거리 표시 업데이트
 function updateDistanceText(distanceMeters) {
     if (!distanceDiv) return;
+    const mapSize = document.getElementById("map").offsetWidth;
     let text, unit;
     if (distanceMeters >= 1000) {
         text = (distanceMeters / 1000).toFixed(2);
@@ -79,74 +155,11 @@ function updateDistanceText(distanceMeters) {
         text = distanceMeters.toFixed(0);
         unit = "m";
     }
-    distanceDiv.innerHTML = `${text} <span>${unit}</span>`;
+    if (mapSize < 200) distanceDiv.innerHTML = `${text}`;
+    else distanceDiv.innerHTML = `${text} <span>${unit}</span>`;
 }
 
-// ====================== 마커 생성 ======================
-function createMarker(pos) {
-    if (marker) marker.setMap(null);
-    marker = new google.maps.Marker({
-        position: pos,
-        map: map,
-        icon: {
-            url: "data:image/svg+xml;utf-8," + encodeURIComponent(`
-                <svg xmlns="http://www.w3.org/2000/svg" width="30" height="40">
-                  <polygon points="12,10 18,10 25,15 15,40 5,15" fill="red"/>
-                </svg>`),
-            scaledSize: new google.maps.Size(30, 40)
-        }
-    });
-}
-
-function createDestinationMarker(pos) {
-    if (destinationMarker) destinationMarker.setMap(null);
-    destinationMarker = new google.maps.Marker({
-        position: pos,
-        map: map,
-        icon: {
-            url: "data:image/svg+xml;utf-8," + encodeURIComponent(`
-                <svg xmlns="http://www.w3.org/2000/svg" width="30" height="40">
-                  <polygon points="12,10 18,10 25,15 15,40 5,15" fill="blue"/>
-                </svg>`),
-            scaledSize: new google.maps.Size(30, 40)
-        }
-    });
-}
-
-// ====================== DIV 생성 ======================
-function createAddressDiv() {
-    if (!addressDiv) {
-        addressDiv = document.createElement("div");
-        addressDiv.style.fontSize = "20px";
-        addressDiv.style.fontWeight = "900";
-        addressDiv.style.padding = "0"; 
-        addressDiv.style.backgroundColor = "transparent"; 
-        addressDiv.style.color = "#000";
-        addressDiv.style.textAlign = "center"; 
-        addressDiv.style.width = "300px"; 
-        addressDiv.style.overflow = "hidden";    
-        addressDiv.style.whiteSpace = "nowrap";  
-        map.controls[google.maps.ControlPosition.TOP_CENTER].push(addressDiv);
-    }
-}
-
-function createDistanceDiv() {
-    if (!distanceDiv) {
-        distanceDiv = document.createElement("div");
-        distanceDiv.style.fontSize = "16px";
-        distanceDiv.style.fontWeight = "bold";
-        distanceDiv.style.padding = "0"; 
-        distanceDiv.style.backgroundColor = "transparent"; 
-        distanceDiv.style.color = "#000";
-        distanceDiv.style.textAlign = "center";  
-        distanceDiv.style.width = "120px"; 
-        distanceDiv.style.overflow = "hidden";    
-        distanceDiv.style.whiteSpace = "nowrap";  
-        map.controls[google.maps.ControlPosition.BOTTOM_CENTER].push(distanceDiv);
-    }
-}
-
-// ====================== 경로 그리기 ======================
+// ✅ 경로 그리기
 function drawFlexibleRoute(start, end) {
     const modes = [
         google.maps.TravelMode.WALKING,
@@ -184,22 +197,13 @@ function drawFlexibleRoute(start, end) {
     tryRoute(0);
 }
 
-// ====================== 초기화 ======================
 window.onload = function() {
     const container = document.getElementById("map");
     map = new google.maps.Map(container, {
         center: {lat: 37.5665, lng: 126.9780},
         zoom: 14,
         disableDefaultUI: true,
-        styles: [
-            { elementType: "geometry", stylers: [{ color: "#212121" }] },
-            { elementType: "labels.icon", stylers: [{ visibility: "off" }] },
-            { elementType: "labels.text.fill", stylers: [{ color: "#757575" }] },
-            { elementType: "labels.text.stroke", stylers: [{ color: "#212121" }] },
-            { featureType: "road", elementType: "geometry.fill", stylers: [{ color: "#2c2c2c" }] },
-            { featureType: "road", elementType: "geometry.stroke", stylers: [{ color: "#1c1c1c" }] },
-            { featureType: "water", elementType: "geometry", stylers: [{ color: "#000000" }] }
-        ]
+        styles: darkModeStyle
     });
 
     geocoder = new google.maps.Geocoder();
@@ -208,10 +212,15 @@ window.onload = function() {
     createAddressDiv();
     createDistanceDiv();
 
-    const locRef = ref(db, "location/current");
-    const destRef = ref(db, "location/destination");
+    const darkRef = ref(db, "location/settings/darkMode");
+    onValue(darkRef, (snapshot) => {
+        const enabled = snapshot.val();
+        map.setOptions({ styles: enabled ? darkModeStyle : [] });
+        if (addressDiv) addressDiv.style.color = enabled ? "#fff" : "#000";
+        if (distanceDiv) distanceDiv.style.color = enabled ? "#4285F4" : "#000";
+    });
 
-    // 현재 위치 업데이트
+    const locRef = ref(db, "location/current");
     onValue(locRef, (snapshot) => {
         const data = snapshot.val();
         if (!data) return;
@@ -219,23 +228,43 @@ window.onload = function() {
         if (!marker) createMarker(pos);
         else marker.setPosition(pos);
         map.setCenter(pos);
+
+        if (data.level !== undefined) map.setZoom(20 - data.level);
+        if (data.mapSize !== undefined) {
+            container.style.width = data.mapSize + "px";
+            container.style.height = data.mapSize + "px";
+        }
+        if (data.opacity !== undefined) container.style.opacity = data.opacity;
+        if (data.borderRadius !== undefined) container.style.borderRadius = data.borderRadius + "px";
+
         updateAddress(pos.lat, pos.lng);
     });
 
-    // 클릭 & 더블클릭 처리
+    // ✅ 클릭 & 더블클릭 구분
     map.addListener("click", (e) => {
         if (clickTimeout) return;
         clickTimeout = setTimeout(() => {
             clickTimeout = null;
-            if (destinationMarker) set(destRef, null);
-            else set(destRef, { lat: e.latLng.lat(), lng: e.latLng.lng() });
+            const destRef = ref(db, "location/destination");
+            if (destinationMarker) {
+                set(destRef, null);
+                if (routePolyline) routePolyline.setMap(null);
+                distanceDiv.innerText = "";
+            } else {
+                set(destRef, { lat: e.latLng.lat(), lng: e.latLng.lng() });
+            }
         }, 250);
     });
-    map.addListener("dblclick", () => {
-        if (clickTimeout) { clearTimeout(clickTimeout); clickTimeout = null; }
+
+    map.addListener("dblclick", (e) => {
+        if (clickTimeout) {
+            clearTimeout(clickTimeout);
+            clickTimeout = null;
+        }
     });
 
-    // 목적지 변경 감지
+    // ✅ 목적지 마커 변경 감지 (한 번만 경로 계산)
+    const destRef = ref(db, "location/destination");
     onValue(destRef, (snapshot) => {
         const dest = snapshot.val();
         if (!dest) {
@@ -245,13 +274,20 @@ window.onload = function() {
             distanceDiv.innerText = "";
             return;
         }
+
         const destPos = {lat: dest.lat, lng: dest.lng};
-        if (!destinationMarker) createDestinationMarker(destPos);
-        else destinationMarker.setPosition(destPos);
-        if (marker) drawFlexibleRoute(marker.getPosition().toJSON(), destPos);
+        if (!destinationMarker) {
+            // 🔹 목적지 처음 설정될 때만 경로/거리 계산
+            createDestinationMarker(destPos);
+            if (marker) {
+                drawFlexibleRoute(marker.getPosition().toJSON(), destPos);
+            }
+        } else {
+            // 🔹 마커만 이동 (경로/거리 갱신 X)
+            destinationMarker.setPosition(destPos);
+        }
     });
 
-    // 리사이즈 시 주소 갱신
     window.addEventListener("resize", () => {
         if (marker) {
             const pos = marker.getPosition().toJSON();
