@@ -1,374 +1,200 @@
-<title>유튜브다중화면 by 쩡햄Live</title>
-<script>
-//시작시 저장데이터 로드	
-	window.onload = function() {
-    var savedContent = localStorage.getItem('autosaveContent');
-     		
-    if (savedContent) {
-			var arrout = savedContent.split(",");
-      
-      for(var i=0;i<arrout.length;i++) { 
-      	var valnum = "val"+(i+1);
-   	  	
-   	  	document.getElementById(valnum).value = arrout[i];
-  		}
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>실시간 맵/구글 맵 최적화</title>
+<script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyD8swteRAgf-r_tS_uncv_IWJKcGghanrY&libraries=geometry"></script>
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/12.1.0/firebase-app.js";
+import { getDatabase, ref, onValue, set } from "https://www.gstatic.com/firebasejs/12.1.0/firebase-database.js";
+
+const firebaseConfig = {
+    apiKey: "AIzaSyAQGtOEcxFxl9FV7NASLgxLDc23u2vzS_0",
+    authDomain: "mygps-11798.firebaseapp.com",
+    databaseURL: "https://mygps-11798-default-rtdb.asia-southeast1.firebasedatabase.app",
+    projectId: "mygps-11798",
+    storageBucket: "mygps-11798.firebasestorage.app",
+    messagingSenderId: "271371741627",
+    appId: "1:271371741627:web:642901f43c5ad57d80bc9e"
+};
+const app = initializeApp(firebaseConfig);
+const db = getDatabase(app);
+
+let map, marker, destinationMarker, routePolyline;
+let addressDiv, distanceDiv, geocoder, directionsService, lastPosition = null;
+const darkModeStyle = [
+  { elementType: "geometry", stylers: [{ color: "#212121" }] },
+  { elementType: "labels.icon", stylers: [{ visibility: "off" }] },
+  { elementType: "labels.text.fill", stylers: [{ color: "#757575" }] },
+  { elementType: "labels.text.stroke", stylers: [{ color: "#212121" }] },
+  { featureType: "administrative", elementType: "geometry", stylers: [{ color: "#757575" }] },
+  { featureType: "poi", elementType: "geometry", stylers: [{ color: "#303030" }] },
+  { featureType: "poi.park", elementType: "geometry", stylers: [{ color: "#181818" }] },
+  { featureType: "road", elementType: "geometry.fill", stylers: [{ color: "#2c2c2c" }] },
+  { featureType: "road", elementType: "geometry.stroke", stylers: [{ color: "#1c1c1c" }] },
+  { featureType: "water", elementType: "geometry", stylers: [{ color: "#000000" }] }
+];
+
+// ✅ 공통 Marker 생성
+function createMarker(pos, color = "red", isDestination = false) {
+    if (!isDestination) {
+        if (marker) marker.setMap(null);
+        marker = new google.maps.Marker({ position: pos, map, icon: generateMarkerIcon(color) });
+    } else {
+        if (destinationMarker) destinationMarker.setMap(null);
+        destinationMarker = new google.maps.Marker({ position: pos, map, icon: generateMarkerIcon(color) });
     }
-    add1();
-  	add2();
-  	add3();
-  	add4();
-  	add5();
-  	add6();
-	};
+}
+function generateMarkerIcon(color) {
+    return {
+        url: "data:image/svg+xml;utf-8," + encodeURIComponent(`
+            <svg xmlns="http://www.w3.org/2000/svg" width="30" height="40">
+              <polygon points="12,10 18,10 25,15 15,40 5,15" fill="${color}"/>
+            </svg>`),
+        scaledSize: new google.maps.Size(30, 40)
+    };
+}
 
-//데이터 저장/새로고침
-	function autoSave() {  
-		if(confirm("데이터는 메모리에 저장되고 리소스만 초기화됩니다.")){		
-			var arrin = [];
-			var length = table.getElementsByTagName('input').length + table.getElementsByTagName('textarea').length;
-	
-			for(var i=0;i<length;i++) { 
-				var valnum = "val"+(i+1);
-	
-	  		arrin[i] =	document.getElementById(valnum).value;
-			}
-			localStorage.setItem('autosaveContent', arrin);
-			location.reload(true);
-		}else{
-			//취소
-		}
-	}
-  
-//엔터로 실행
-	function key1(){
-		if(event.keyCode == 13){
-			add1();
-		}
-	}
-		
-	function key2(){
-		if(event.keyCode == 13){
-			add2();
-		}
-	}
-		
-	function key3(){
-		if(event.keyCode == 13){
-			add3();
-		}
-	}
-		
-	function key4(){
-		if(event.keyCode == 13){
-			add4();
-		}
-	}
-		
-	function key5(){
-		if(event.keyCode == 13){
-			add5();
-		}
-	}
-		
-	function key6(){
-		if(event.keyCode == 13){
-			add6();
-		}
-	}
-	
-	function key7(){
-		if(event.keyCode == 13){
-			add7();
-		}
-	}
-	
-	function key8(){
-		if(event.keyCode == 13){
-			add8();
-		}
-	}
+// ✅ 공통 Div 생성
+function createDiv(width, fontSize, color, position) {
+    const div = document.createElement("div");
+    div.style.fontSize = fontSize;
+    div.style.fontWeight = "bold";
+    div.style.padding = "0";
+    div.style.backgroundColor = "transparent";
+    div.style.color = color;
+    div.style.textAlign = "center";
+    div.style.width = width + "px";
+    div.style.overflow = "hidden";
+    div.style.whiteSpace = "nowrap";
+    map.controls[position].push(div);
+    return div;
+}
 
-	function key9(){
-		if(event.keyCode == 13){
-			add9();
-		}
-	}
+// ✅ 주소 단순화
+function simplifyName(name) {
+    const map = {"서울특별시":"서울","부산광역시":"부산","대구광역시":"대구","인천광역시":"인천","광주광역시":"광주","대전광역시":"대전","울산광역시":"울산","세종특별자치시":"세종","제주특별자치도":"제주","경기도":"경기","강원도":"강원","충청북도":"충북","충청남도":"충남","경상북도":"경북","경상남도":"경남","전라북도":"전북","전라남도":"전남"};
+    if (map[name]) return map[name];
+    if (/제?\d+동$/.test(name)) return name.replace(/제?\d+동$/,"동");
+    if (/\d+동$/.test(name)) return name.replace(/\d+동$/,"동");
+    return name;
+}
 
-	function key10(){
-		if(event.keyCode == 13){
-			add10();
-		}
-	}
+// ✅ 주소 업데이트
+function updateAddress(lat, lng) {
+    const width = document.getElementById("map").offsetWidth;
+    geocoder.geocode({ location: { lat, lng } }, (results, status) => {
+        if (status === "OK" && results.length) {
+            let selected = results.find(r => /(동|읍|면)/.test(r.formatted_address)) || results[0];
+            let sido="", sigungu="", dong="";
+            selected.formatted_address.split(" ").forEach(part=>{
+                if(part.endsWith("시")||part.endsWith("도")) sido=simplifyName(part);
+                else if(part.endsWith("구")||part.endsWith("군")) sigungu=simplifyName(part);
+                else if(part.endsWith("동")||part.endsWith("읍")||part.endsWith("면")) dong=simplifyName(part);
+            });
+            let displayText="";
+            if(width>430) displayText=[sido,sigungu,dong].filter(Boolean).join(" ");
+            else if(width>330) displayText=[sigungu,dong].filter(Boolean).join(" ");
+            else displayText=dong||sigungu||sido;
+            addressDiv.innerText=displayText;
+        } else addressDiv.innerText="주소를 가져올 수 없음";
+    });
+}
 
-	function key11(){
-		if(event.keyCode == 13){
-			add11();
-		}
-	}
+// ✅ 거리 업데이트
+function updateDistanceText(distanceMeters) {
+    if (!distanceDiv) return;
+    const mapSize = document.getElementById("map").offsetWidth;
+    let text, unit;
+    if (distanceMeters>=1000) { text=(distanceMeters/1000).toFixed(2); unit="km"; }
+    else { text=distanceMeters.toFixed(0); unit="m"; }
+    distanceDiv.innerHTML = mapSize<200 ? `${text}` : `${text} <span>${unit}</span>`;
+}
 
-	function key12(){
-		if(event.keyCode == 13){
-			add12();
-		}
-	}
-	
-//초기화
-	function clean(){
-		if(confirm("전부 지워집니다. 초기화 하겠습니까?")){
- 			document.getElementById('val1').value = "";
- 			document.getElementById('val2').value = "";
- 			document.getElementById('val3').value = "";
- 			document.getElementById('val4').value = "";
- 			document.getElementById('val5').value = "";
- 			document.getElementById('val6').value = "";
- 			document.getElementById('val7').value = "";
- 			document.getElementById('val8').value = "";
- 			document.getElementById('val9').value = "";
- 			document.getElementById('val10').value = "";
- 			document.getElementById('val11').value = "";
- 			document.getElementById('val12').value = "";
- 			document.getElementById('val13').value = "";
- 			document.getElementById('val14').value = "";
- 			document.getElementById('val15').value = "";
- 			
-			var arrin = [];
-			var length = table.getElementsByTagName('input').length + table.getElementsByTagName('textarea').length;
-	
-			for(var i=0;i<length;i++) { 
-				var valnum = "val"+(i+1);
-	
-	  		arrin[i] =	document.getElementById(valnum).value;
-			}
-			localStorage.setItem('autosaveContent', arrin);
-			location.reload(true);
- 		}else{
- 			//취소
- 		}
- 	}	
+// ✅ Polyline 재사용 경로 그리기 (도보→자전거→자동차→대중교통)
+function drawFlexibleRoute(start, end) {
+    const modes = [google.maps.TravelMode.WALKING, google.maps.TravelMode.BICYCLING, google.maps.TravelMode.DRIVING, google.maps.TravelMode.TRANSIT];
+    function tryRoute(index) {
+        if(index>=modes.length){ distanceDiv.innerText="경로를 찾을 수 없음"; return; }
+        directionsService.route({ origin:start, destination:end, travelMode:modes[index] }, (result,status)=>{
+            if(status==="OK" && result.routes.length>0){
+                const path=result.routes[0].overview_path;
+                if(!routePolyline) routePolyline=new google.maps.Polyline({ map, strokeColor:"#4285F4", strokeOpacity:1.0, strokeWeight:5 });
+                routePolyline.setPath(path);
+                const dist=result.routes[0].legs[0].distance.value;
+                updateDistanceText(dist);
+            } else tryRoute(index+1);
+        });
+    }
+    tryRoute(0);
+}
 
-//화면에 소스 출력
-	function add1(){
-		var str1 = document.getElementById('val1').value;
-		
-		document.getElementById('out1').innerHTML = str1;
-	}
+// ✅ 디바운스 유틸
+function debounce(func, delay) {
+    let timer;
+    return function(...args){ clearTimeout(timer); timer=setTimeout(()=>func.apply(this,args), delay); };
+}
 
-	function add2(){
-		var str2 = document.getElementById('val2').value;
-		
-		document.getElementById('out2').innerHTML = str2;
-	}
+// ✅ 초기화
+window.onload = function() {
+    const container=document.getElementById("map");
+    map=new google.maps.Map(container,{ center:{lat:37.5665,lng:126.9780}, zoom:14, disableDefaultUI:true, styles:darkModeStyle });
+    geocoder=new google.maps.Geocoder();
+    directionsService=new google.maps.DirectionsService();
+    addressDiv=createDiv(300,"20px","#000",google.maps.ControlPosition.TOP_CENTER);
+    distanceDiv=createDiv(120,"16px","#000",google.maps.ControlPosition.BOTTOM_CENTER);
 
-	function add3(){
-		var str3 = document.getElementById('val3').value;
-		
-		document.getElementById('out3').innerHTML = str3;
-	}
+    const darkRef=ref(db,"location/settings/darkMode");
+    onValue(darkRef,snapshot=>{
+        const enabled=snapshot.val();
+        map.setOptions({styles:enabled?darkModeStyle:[]});
+        addressDiv.style.color = enabled?"#fff":"#000";
+        distanceDiv.style.color = enabled?"#4285F4":"#000";
+    });
 
-	function add4(){
-		var str4 = document.getElementById('val4').value;
-		
-		document.getElementById('out4').innerHTML = str4;
-	}
-	
-	function add5(){
-		var str5 = document.getElementById('val5').value;
-		
-		document.getElementById('out5').innerHTML = str5;
-	}
+    const locRef=ref(db,"location/current");
+    onValue(locRef,snapshot=>{
+        const data=snapshot.val(); if(!data) return;
+        const pos={lat:data.lat,lng:data.lng};
+        if(!marker) createMarker(pos,"red"); else marker.setPosition(pos);
+        map.setCenter(pos);
+        if(data.level!==undefined) map.setZoom(20-data.level);
+        if(data.mapSize!==undefined){ container.style.width=data.mapSize+"px"; container.style.height=data.mapSize+"px";
+            if(routePolyline && destinationMarker){ const dist=google.maps.geometry.spherical.computeDistanceBetween(marker.getPosition(),destinationMarker.getPosition()); updateDistanceText(dist); } }
+        if(data.opacity!==undefined) container.style.opacity=data.opacity;
+        if(data.borderRadius!==undefined) container.style.borderRadius=data.borderRadius+"px";
+        if(!lastPosition || google.maps.geometry.spherical.computeDistanceBetween(new google.maps.LatLng(pos), new google.maps.LatLng(lastPosition))>5){ updateAddress(pos.lat,pos.lng); lastPosition=pos; }
+        if(destinationMarker) drawFlexibleRoute(pos,destinationMarker.getPosition().toJSON());
+    });
 
-	function add6(){
-		var str6 = document.getElementById('val6').value;
-		
-		document.getElementById('out6').innerHTML = str6;
-	}
+    const destRef=ref(db,"location/destination");
+    onValue(destRef,snapshot=>{
+        const dest=snapshot.val();
+        if(!dest){ if(destinationMarker) destinationMarker.setMap(null); destinationMarker=null; if(routePolyline) routePolyline.setPath([]); distanceDiv.innerText=""; return; }
+        const destPos={lat:dest.lat,lng:dest.lng};
+        if(!destinationMarker) createMarker(destPos,"blue",true); else destinationMarker.setPosition(destPos);
+        if(marker) drawFlexibleRoute(marker.getPosition().toJSON(),destPos);
+    });
 
-	function add7(){
-		var str7 = document.getElementById('val7').value;
-		
-		document.getElementById('out1').innerHTML = str7;
-	}
-	
-	function add8(){
-		var str8 = document.getElementById('val8').value;
-		
-		document.getElementById('out2').innerHTML = str8;
-	}
-	
-	function add9(){
-		var str9 = document.getElementById('val9').value;
-		
-		document.getElementById('out3').innerHTML = str9;
-	}
-	
-	function add10(){
-		var str10 = document.getElementById('val10').value;
-		
-		document.getElementById('out4').innerHTML = str10;
-	}
-	
-	function add11(){
-		var str11 = document.getElementById('val11').value;
-		
-		document.getElementById('out5').innerHTML = str11;
-	}
-	
-	function add12(){
-		var str12 = document.getElementById('val12').value;
-		
-		document.getElementById('out6').innerHTML = str12;
-	}
-	
-//복사하기/글자비우기	
-	function copy1(){
-		document.getElementById('val1').select();
-		document.execCommand("copy");
-		document.getElementById('val1').value = "";
-	}
-	
-	function copy2(){
-		document.getElementById('val2').select();
-		document.execCommand("copy");
-		document.getElementById('val2').value = "";
-	}
-	
-	function copy3(){
-		document.getElementById('val3').select();
-		document.execCommand("copy");
-		document.getElementById('val3').value = "";
-	}
-	
-	function copy4(){
-		document.getElementById('val4').select();
-		document.execCommand("copy");
-		document.getElementById('val4').value = "";
-	}
-	
-	function copy5(){
-		document.getElementById('val5').select();
-		document.execCommand("copy");
-		document.getElementById('val5').value = "";
-	}
-	
-	function copy6(){
-		document.getElementById('val6').select();
-		document.execCommand("copy");
-		document.getElementById('val6').value = "";
-	}
-	
-	function copy7(){
-		document.getElementById('val7').select();
-		document.execCommand("copy");
-		document.getElementById('val7').value = "";
-	}
-	
-	function copy8(){
-		document.getElementById('val8').select();
-		document.execCommand("copy");
-		document.getElementById('val8').value = "";
-	}
-	
-	function copy9(){
-		document.getElementById('val9').select();
-		document.execCommand("copy");
-		document.getElementById('val9').value = "";
-	}
-	
-	function copy10(){
-		document.getElementById('val10').select();
-		document.execCommand("copy");
-		document.getElementById('val10').value = "";
-	}
-	
-	function copy11(){
-		document.getElementById('val11').select();
-		document.execCommand("copy");
-		document.getElementById('val11').value = "";
-	}
-	
-	function copy12(){
-		document.getElementById('val12').select();
-		document.execCommand("copy");
-		document.getElementById('val12').value = "";
-	}
-	
-//F5키 저장 후 리로드	
-	document.addEventListener('keydown', function(e) {
-		if(e.key == 'F5') {
-			autoSave();
-  	}
-	});	
+    map.addListener("click",(e)=>{
+        const destRef=ref(db,"location/destination");
+        if(destinationMarker){ set(destRef,null); if(routePolyline) routePolyline.setPath([]); distanceDiv.innerText=""; }
+        else set(destRef,{lat:e.latLng.lat(),lng:e.latLng.lng()});
+    });
+
+    window.addEventListener("resize", debounce(()=>{
+        if(marker){ const pos=marker.getPosition().toJSON(); updateAddress(pos.lat,pos.lng); }
+        if(routePolyline && destinationMarker){ const dist=google.maps.geometry.spherical.computeDistanceBetween(marker.getPosition(),destinationMarker.getPosition()); updateDistanceText(dist); }
+    },100));
+};
 </script>
-
+<style>
+body{margin:0;padding:0;min-height:100vh;}
+#map{width:200px;height:200px;border:1px solid #000;border-radius:0px;transition:border-radius 0.2s ease,opacity 0.2s ease,width 0.2s ease,height 0.2s ease;position:absolute;top:0;right:0;}
+.gm-style-cc{bottom:-100px !important;right:-100px !important;}
+</style>
+</head>
 <body>
-	<table id="table">
-		<tr valign="top">
-			<td>
-				<input type="text" id="val1" onKeydown="key1(this);" onfocus="this.select()" placeholder="공유 퍼가기의 주소1" size="23">
-				<button onclick="autoSave();" style="cursor:pointer;padding:1 3.5;" title="데이터는 메모리에 저장되고 리소스만 초기화됩니다.">리로드</button>
-				<button onclick="clean();" style="cursor:pointer;padding:1 3.5;">초기화</button>
-				<button onclick="window.open('https://www.youtube.com');" style="cursor:pointer;padding:3 11.5;background-color:red;border-radius:3px;border:none;">▶</button>
-				<button onclick="add1();" style="cursor:pointer;">보기1</button>
-				<button onclick="copy1();" style="cursor:pointer;">복사1</button>
-				<div id="out1"></div>
-
-				<input type="text" id="val2" onKeydown="key2(this);" onfocus="this.select()" placeholder="공유 퍼가기의 주소2" size="45">
-				<button onclick="add2();" style="cursor:pointer;">보기2</button>
-				<button onclick="copy2();" style="cursor:pointer;">복사2</button>
-				<div id="out2"></div>
-				
-				<input type="text" id="val7" onKeydown="key7(this);" onfocus="this.select()" placeholder="수정1" size="45">
-				<button onclick="add7();" style="cursor:pointer;">보기1</button>
-				<button onclick="copy7();" style="cursor:pointer;">복사1</button>
-				
-				<input type="text" id="val8" onKeydown="key8(this);" onfocus="this.select()" placeholder="수정2" size="45">
-				<button onclick="add8();" style="cursor:pointer;">보기2</button>
-				<button onclick="copy8();" style="cursor:pointer;">복사2</button>
-				
-				<textarea id="val13" onfocus="this.select()" placeholder="메모1" cols="63" rows="47"></textarea>
-			</td>
-			<td>
-				<input type="text" id="val3" onKeydown="key3(this);" onfocus="this.select()" placeholder="공유 퍼가기의 주소3" size="45">
-				<button onclick="add3();" style="cursor:pointer;">보기3</button>
-				<button onclick="copy3();" style="cursor:pointer;">복사3</button>
-				<div id="out3"></div>
-
-				<input type="text" id="val4" onKeydown="key4(this);" onfocus="this.select()" placeholder="공유 퍼가기의 주소4" size="45">
-				<button onclick="add4();" style="cursor:pointer;">보기4</button>
-				<button onclick="copy4();" style="cursor:pointer;">복사4</button>
-				<div id="out4"></div>
-				
-				<input type="text" id="val9" onKeydown="key9(this);" onfocus="this.select()" placeholder="수정3" size="45">
-				<button onclick="add9();" style="cursor:pointer;">보기3</button>
-				<button onclick="copy9();" style="cursor:pointer;">복사3</button>
-				
-				<input type="text" id="val10" onKeydown="key10(this);" onfocus="this.select()" placeholder="수정4" size="45">
-				<button onclick="add10();" style="cursor:pointer;">보기4</button>
-				<button onclick="copy10();" style="cursor:pointer;">복사4</button>
-				
-				<textarea id="val14" onfocus="this.select()" placeholder="메모2" cols="63" rows="47"></textarea>				
-			</td>
-			<td>
-				<input type="text" id="val5" onKeydown="key5(this);" onfocus="this.select()" placeholder="공유 퍼가기의 주소5" size="45">
-				<button onclick="add5();" style="cursor:pointer;">보기5</button>
-				<button onclick="copy5();" style="cursor:pointer;">복사5</button>
-				<div id="out5"></div>
-
-				<input type="text" id="val6" onKeydown="key6(this);" onfocus="this.select()" placeholder="공유 퍼가기의 주소6" size="45">
-				<button onclick="add6();" style="cursor:pointer;">보기6</button>
-				<button onclick="copy6();" style="cursor:pointer;">복사6</button>
-				<div id="out6"></div>
-				
-				<input type="text" id="val11" onKeydown="key11(this);" onfocus="this.select()" placeholder="수정5" size="45">
-				<button onclick="add11();" style="cursor:pointer;">보기5</button>
-				<button onclick="copy11();" style="cursor:pointer;">복사5</button>
-								
-				<input type="text" id="val12" onKeydown="key12(this);" onfocus="this.select()" placeholder="수정6" size="45">
-				<button onclick="add12();" style="cursor:pointer;">보기6</button>
-				<button onclick="copy12();" style="cursor:pointer;">복사6</button>
-				
-				<textarea id="val15" onfocus="this.select()" placeholder="메모3  Made by 쩡햄Live" cols="63" rows="47"></textarea>				
-			</td>
-		</tr>
-	</table>
+<div id="map"></div>
 </body>
+</html>
