@@ -2,7 +2,7 @@
 <html>
 <head>
 <meta charset="utf-8">
-<title>실시간 맵/구글 맵 최적화</title>
+<title>실시간 구글맵 최적화</title>
 <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyD8swteRAgf-r_tS_uncv_IWJKcGghanrY&libraries=geometry"></script>
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/12.1.0/firebase-app.js";
@@ -20,8 +20,18 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 const db = getDatabase(app);
 
-let map, marker, destinationMarker, routePolyline;
-let addressDiv, distanceDiv, geocoder, directionsService, lastPosition = null;
+let map, marker, destinationMarker;
+let addressDiv, distanceDiv;
+let geocoder, directionsService;
+let lastPosition = null;
+let routePolyline = null;
+let clickTimeout = null;
+
+const PATH_CURRENT = "location/current";
+const PATH_DEST = "location/destination";
+const PATH_DARK = "location/settings/darkMode";
+
+// 다크모드 스타일
 const darkModeStyle = [
   { elementType: "geometry", stylers: [{ color: "#212121" }] },
   { elementType: "labels.icon", stylers: [{ visibility: "off" }] },
@@ -35,163 +45,220 @@ const darkModeStyle = [
   { featureType: "water", elementType: "geometry", stylers: [{ color: "#000000" }] }
 ];
 
-// ✅ 공통 Marker 생성
-function createMarker(pos, color = "red", isDestination = false) {
-    if (!isDestination) {
-        if (marker) marker.setMap(null);
-        marker = new google.maps.Marker({ position: pos, map, icon: generateMarkerIcon(color) });
-    } else {
-        if (destinationMarker) destinationMarker.setMap(null);
-        destinationMarker = new google.maps.Marker({ position: pos, map, icon: generateMarkerIcon(color) });
-    }
-}
-function generateMarkerIcon(color) {
-    return {
-        url: "data:image/svg+xml;utf-8," + encodeURIComponent(`
-            <svg xmlns="http://www.w3.org/2000/svg" width="30" height="40">
-              <polygon points="12,10 18,10 25,15 15,40 5,15" fill="${color}"/>
-            </svg>`),
-        scaledSize: new google.maps.Size(30, 40)
-    };
+// 마커 생성 함수
+function createMarker(pos, color = "red") {
+    if (marker && color === "red") marker.setMap(null);
+    if (destinationMarker && color === "blue") destinationMarker.setMap(null);
+    const m = new google.maps.Marker({
+        position: pos,
+        map: map,
+        icon: {
+            url: `data:image/svg+xml;utf-8,${encodeURIComponent(`
+                <svg xmlns="http://www.w3.org/2000/svg" width="30" height="40">
+                  <polygon points="12,10 18,10 25,15 15,40 5,15" fill="${color}"/>
+                </svg>`)}`,
+            scaledSize: new google.maps.Size(30, 40)
+        }
+    });
+    if (color === "red") marker = m;
+    else destinationMarker = m;
 }
 
-// ✅ 공통 Div 생성
-function createDiv(width, fontSize, color, position) {
+// div 생성 함수
+function createDiv(type) {
     const div = document.createElement("div");
-    div.style.fontSize = fontSize;
-    div.style.fontWeight = "bold";
     div.style.padding = "0";
     div.style.backgroundColor = "transparent";
-    div.style.color = color;
     div.style.textAlign = "center";
-    div.style.width = width + "px";
     div.style.overflow = "hidden";
     div.style.whiteSpace = "nowrap";
-    map.controls[position].push(div);
+    if (type === "address") {
+        div.style.fontSize = "20px";
+        div.style.fontWeight = "900";
+        map.controls[google.maps.ControlPosition.TOP_CENTER].push(div);
+    } else {
+        div.style.fontSize = "16px";
+        div.style.fontWeight = "bold";
+        map.controls[google.maps.ControlPosition.BOTTOM_CENTER].push(div);
+    }
     return div;
 }
 
-// ✅ 주소 단순화
+// 주소 간략화
 function simplifyName(name) {
-    const map = {"서울특별시":"서울","부산광역시":"부산","대구광역시":"대구","인천광역시":"인천","광주광역시":"광주","대전광역시":"대전","울산광역시":"울산","세종특별자치시":"세종","제주특별자치도":"제주","경기도":"경기","강원도":"강원","충청북도":"충북","충청남도":"충남","경상북도":"경북","경상남도":"경남","전라북도":"전북","전라남도":"전남"};
+    const map = {
+        "서울특별시": "서울", "부산광역시": "부산", "대구광역시": "대구",
+        "인천광역시": "인천", "광주광역시": "광주", "대전광역시": "대전",
+        "울산광역시": "울산", "세종특별자치시": "세종", "제주특별자치도": "제주",
+        "경기도": "경기", "강원도": "강원", "충청북도": "충북", "충청남도": "충남",
+        "경상북도": "경북", "경상남도": "경남", "전라북도": "전북", "전라남도": "전남"
+    };
     if (map[name]) return map[name];
-    if (/제?\d+동$/.test(name)) return name.replace(/제?\d+동$/,"동");
-    if (/\d+동$/.test(name)) return name.replace(/\d+동$/,"동");
-    return name;
+    return name.replace(/제?\d+동$/, "동");
 }
 
-// ✅ 주소 업데이트
+// 주소 업데이트
+let lastAddressPos = null;
 function updateAddress(lat, lng) {
+    if (lastAddressPos && google.maps.geometry.spherical.computeDistanceBetween(
+        new google.maps.LatLng(lat, lng),
+        new google.maps.LatLng(lastAddressPos)
+    ) < 5) return; // 이동 5m 미만이면 갱신 X
+    lastAddressPos = {lat, lng};
+
     const width = document.getElementById("map").offsetWidth;
     geocoder.geocode({ location: { lat, lng } }, (results, status) => {
         if (status === "OK" && results.length) {
             let selected = results.find(r => /(동|읍|면)/.test(r.formatted_address)) || results[0];
-            let sido="", sigungu="", dong="";
-            selected.formatted_address.split(" ").forEach(part=>{
-                if(part.endsWith("시")||part.endsWith("도")) sido=simplifyName(part);
-                else if(part.endsWith("구")||part.endsWith("군")) sigungu=simplifyName(part);
-                else if(part.endsWith("동")||part.endsWith("읍")||part.endsWith("면")) dong=simplifyName(part);
+            let sido = "", sigungu = "", dong = "";
+            selected.formatted_address.split(" ").forEach(part => {
+                if (part.endsWith("시") || part.endsWith("도")) sido = simplifyName(part);
+                else if (part.endsWith("구") || part.endsWith("군")) sigungu = simplifyName(part);
+                else if (part.endsWith("동") || part.endsWith("읍") || part.endsWith("면")) dong = simplifyName(part);
             });
-            let displayText="";
-            if(width>430) displayText=[sido,sigungu,dong].filter(Boolean).join(" ");
-            else if(width>330) displayText=[sigungu,dong].filter(Boolean).join(" ");
-            else displayText=dong||sigungu||sido;
-            addressDiv.innerText=displayText;
-        } else addressDiv.innerText="주소를 가져올 수 없음";
+            let displayText = width > 430 ? [sido,sigungu,dong].filter(Boolean).join(" ")
+                                : width > 330 ? [sigungu,dong].filter(Boolean).join(" ")
+                                : dong || sigungu || sido;
+            addressDiv.innerText = displayText;
+        } else addressDiv.innerText = "주소를 가져올 수 없음";
     });
 }
 
-// ✅ 거리 업데이트
+// 거리 업데이트
 function updateDistanceText(distanceMeters) {
     if (!distanceDiv) return;
     const mapSize = document.getElementById("map").offsetWidth;
-    let text, unit;
-    if (distanceMeters>=1000) { text=(distanceMeters/1000).toFixed(2); unit="km"; }
-    else { text=distanceMeters.toFixed(0); unit="m"; }
-    distanceDiv.innerHTML = mapSize<200 ? `${text}` : `${text} <span>${unit}</span>`;
+    let text = distanceMeters >= 1000 ? (distanceMeters/1000).toFixed(2) : distanceMeters.toFixed(0);
+    let unit = distanceMeters >= 1000 ? "km" : "m";
+    distanceDiv.innerHTML = mapSize < 200 ? text : `${text} <span>${unit}</span>`;
 }
 
-// ✅ Polyline 재사용 경로 그리기 (도보→자전거→자동차→대중교통)
+// 경로 그리기 최적화
 function drawFlexibleRoute(start, end) {
-    const modes = [google.maps.TravelMode.WALKING, google.maps.TravelMode.BICYCLING, google.maps.TravelMode.DRIVING, google.maps.TravelMode.TRANSIT];
-    function tryRoute(index) {
+    if (!start || !end) return;
+    // 위치가 충분히 변했을 때만
+    if (lastPosition && google.maps.geometry.spherical.computeDistanceBetween(
+        new google.maps.LatLng(start), new google.maps.LatLng(lastPosition)) < 5
+    ) return;
+    lastPosition = start;
+
+    const modes = [google.maps.TravelMode.DRIVING, google.maps.TravelMode.WALKING, google.maps.TravelMode.TRANSIT];
+    function tryRoute(index=0){
         if(index>=modes.length){ distanceDiv.innerText="경로를 찾을 수 없음"; return; }
-        directionsService.route({ origin:start, destination:end, travelMode:modes[index] }, (result,status)=>{
+        directionsService.route({
+            origin: start,
+            destination: end,
+            travelMode: modes[index]
+        }, (result, status) => {
             if(status==="OK" && result.routes.length>0){
-                const path=result.routes[0].overview_path;
-                if(!routePolyline) routePolyline=new google.maps.Polyline({ map, strokeColor:"#4285F4", strokeOpacity:1.0, strokeWeight:5 });
+                const path = result.routes[0].overview_path;
+                if(!routePolyline) routePolyline = new google.maps.Polyline({map, strokeColor:"#4285F4", strokeOpacity:1, strokeWeight:5});
                 routePolyline.setPath(path);
-                const dist=result.routes[0].legs[0].distance.value;
-                updateDistanceText(dist);
+                updateDistanceText(result.routes[0].legs[0].distance.value);
             } else tryRoute(index+1);
         });
     }
-    tryRoute(0);
+    tryRoute();
 }
 
-// ✅ 디바운스 유틸
-function debounce(func, delay) {
-    let timer;
-    return function(...args){ clearTimeout(timer); timer=setTimeout(()=>func.apply(this,args), delay); };
+// debounce 함수
+function debounce(func, wait){
+    let timeout;
+    return function(...args){
+        clearTimeout(timeout);
+        timeout = setTimeout(()=>func.apply(this,args), wait);
+    };
 }
 
-// ✅ 초기화
-window.onload = function() {
-    const container=document.getElementById("map");
-    map=new google.maps.Map(container,{ center:{lat:37.5665,lng:126.9780}, zoom:14, disableDefaultUI:true, styles:darkModeStyle });
-    geocoder=new google.maps.Geocoder();
-    directionsService=new google.maps.DirectionsService();
-    addressDiv=createDiv(300,"20px","#000",google.maps.ControlPosition.TOP_CENTER);
-    distanceDiv=createDiv(120,"16px","#000",google.maps.ControlPosition.BOTTOM_CENTER);
-
-    const darkRef=ref(db,"location/settings/darkMode");
-    onValue(darkRef,snapshot=>{
-        const enabled=snapshot.val();
-        map.setOptions({styles:enabled?darkModeStyle:[]});
-        addressDiv.style.color = enabled?"#fff":"#000";
-        distanceDiv.style.color = enabled?"#4285F4":"#000";
+window.onload = function(){
+    const container = document.getElementById("map");
+    map = new google.maps.Map(container,{
+        center:{lat:37.5665,lng:126.9780},
+        zoom:14,
+        disableDefaultUI:true,
+        styles: darkModeStyle
     });
 
-    const locRef=ref(db,"location/current");
-    onValue(locRef,snapshot=>{
-        const data=snapshot.val(); if(!data) return;
-        const pos={lat:data.lat,lng:data.lng};
+    geocoder = new google.maps.Geocoder();
+    directionsService = new google.maps.DirectionsService();
+
+    addressDiv = createDiv("address");
+    distanceDiv = createDiv("distance");
+
+    const darkRef = ref(db, PATH_DARK);
+    onValue(darkRef, snapshot=>{
+        const enabled = snapshot.val();
+        map.setOptions({styles: enabled? darkModeStyle: []});
+        addressDiv.style.color = enabled? "#fff":"#000";
+        distanceDiv.style.color = enabled? "#4285F4":"#000";
+    });
+
+    const locRef = ref(db, PATH_CURRENT);
+    onValue(locRef, snapshot=>{
+        const data = snapshot.val();
+        if(!data) return;
+        const pos = {lat:data.lat,lng:data.lng};
         if(!marker) createMarker(pos,"red"); else marker.setPosition(pos);
         map.setCenter(pos);
         if(data.level!==undefined) map.setZoom(20-data.level);
-        if(data.mapSize!==undefined){ container.style.width=data.mapSize+"px"; container.style.height=data.mapSize+"px";
-            if(routePolyline && destinationMarker){ const dist=google.maps.geometry.spherical.computeDistanceBetween(marker.getPosition(),destinationMarker.getPosition()); updateDistanceText(dist); } }
-        if(data.opacity!==undefined) container.style.opacity=data.opacity;
-        if(data.borderRadius!==undefined) container.style.borderRadius=data.borderRadius+"px";
-        if(!lastPosition || google.maps.geometry.spherical.computeDistanceBetween(new google.maps.LatLng(pos), new google.maps.LatLng(lastPosition))>5){ updateAddress(pos.lat,pos.lng); lastPosition=pos; }
-        if(destinationMarker) drawFlexibleRoute(pos,destinationMarker.getPosition().toJSON());
+        if(data.mapSize!==undefined){
+            container.style.width = container.style.height = data.mapSize+"px";
+            if(routePolyline && destinationMarker){
+                const dist = google.maps.geometry.spherical.computeDistanceBetween(marker.getPosition(), destinationMarker.getPosition());
+                updateDistanceText(dist);
+            }
+        }
+        if(data.opacity!==undefined) container.style.opacity = data.opacity;
+        if(data.borderRadius!==undefined) container.style.borderRadius = data.borderRadius+"px";
+        updateAddress(pos.lat,pos.lng);
+        if(destinationMarker) drawFlexibleRoute(marker.getPosition().toJSON(), destinationMarker.getPosition().toJSON());
     });
 
-    const destRef=ref(db,"location/destination");
-    onValue(destRef,snapshot=>{
-        const dest=snapshot.val();
-        if(!dest){ if(destinationMarker) destinationMarker.setMap(null); destinationMarker=null; if(routePolyline) routePolyline.setPath([]); distanceDiv.innerText=""; return; }
-        const destPos={lat:dest.lat,lng:dest.lng};
-        if(!destinationMarker) createMarker(destPos,"blue",true); else destinationMarker.setPosition(destPos);
-        if(marker) drawFlexibleRoute(marker.getPosition().toJSON(),destPos);
+    // 클릭/더블클릭
+    map.addListener("click", (e)=>{
+        if(clickTimeout) return;
+        clickTimeout = setTimeout(()=>{
+            clickTimeout=null;
+            const destRef = ref(db, PATH_DEST);
+            if(destinationMarker){
+                set(destRef,null);
+                if(routePolyline) routePolyline.setMap(null);
+                distanceDiv.innerText="";
+            } else set(destRef,{lat:e.latLng.lat(), lng:e.latLng.lng()});
+        }, 250);
+    });
+    map.addListener("dblclick", ()=>{
+        if(clickTimeout){ clearTimeout(clickTimeout); clickTimeout=null; }
     });
 
-    map.addListener("click",(e)=>{
-        const destRef=ref(db,"location/destination");
-        if(destinationMarker){ set(destRef,null); if(routePolyline) routePolyline.setPath([]); distanceDiv.innerText=""; }
-        else set(destRef,{lat:e.latLng.lat(),lng:e.latLng.lng()});
+    const destRef = ref(db, PATH_DEST);
+    onValue(destRef, snapshot=>{
+        const dest = snapshot.val();
+        if(!dest){
+            if(destinationMarker) destinationMarker.setMap(null);
+            destinationMarker = null;
+            if(routePolyline) routePolyline.setMap(null);
+            distanceDiv.innerText="";
+            return;
+        }
+        const destPos = {lat:dest.lat,lng:dest.lng};
+        if(!destinationMarker) createMarker(destPos,"blue"); else destinationMarker.setPosition(destPos);
+        if(marker) drawFlexibleRoute(marker.getPosition().toJSON(), destPos);
     });
 
     window.addEventListener("resize", debounce(()=>{
-        if(marker){ const pos=marker.getPosition().toJSON(); updateAddress(pos.lat,pos.lng); }
-        if(routePolyline && destinationMarker){ const dist=google.maps.geometry.spherical.computeDistanceBetween(marker.getPosition(),destinationMarker.getPosition()); updateDistanceText(dist); }
-    },100));
+        if(marker) updateAddress(marker.getPosition().lat(), marker.getPosition().lng());
+        if(routePolyline && destinationMarker){
+            const dist = google.maps.geometry.spherical.computeDistanceBetween(marker.getPosition(), destinationMarker.getPosition());
+            updateDistanceText(dist);
+        }
+    }, 200));
 };
 </script>
 <style>
 body{margin:0;padding:0;min-height:100vh;}
-#map{width:200px;height:200px;border:1px solid #000;border-radius:0px;transition:border-radius 0.2s ease,opacity 0.2s ease,width 0.2s ease,height 0.2s ease;position:absolute;top:0;right:0;}
-.gm-style-cc{bottom:-100px !important;right:-100px !important;}
+#map{width:200px;height:200px;border:1px solid #000;border-radius:0px;transition:all 0.2s ease;position:absolute;top:0;right:0;}
+.gm-style-cc{bottom:-100px!important;right:-100px!important;}
 </style>
 </head>
 <body>
