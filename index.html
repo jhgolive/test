@@ -2,7 +2,7 @@
 <html lang="ko">
 <head>
 <meta charset="UTF-8">
-<title>로고계좌타임</title>
+<title>타이핑 페이지</title>
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/12.1.0/firebase-app.js";
 import { getFirestore, collection, getDocs, query, orderBy } from "https://www.gstatic.com/firebasejs/12.1.0/firebase-firestore.js";
@@ -20,7 +20,7 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
 
-// 1️⃣ 전역에서 letters 배열 선언
+// 1️⃣ 전역 letters 배열 선언
 let letters = [];
 
 // Firestore에서 글자 불러오기
@@ -30,7 +30,7 @@ async function loadLetters() {
   letters = snapshot.docs.map(doc => doc.data().text); // letters 배열 채움
   console.log("불러온 글자들:", letters);
 
-  // 2️⃣ 불러온 후에 타이핑 함수 호출
+  // 2️⃣ 불러온 후 타이핑 시작
   typing();
 }
 
@@ -38,9 +38,7 @@ async function loadLetters() {
 loadLetters();
 </script>
 <style>
-  .typing {
-    position: relative;
-  }
+  .typing { position: relative; }
   .brick {
     position: absolute;
     width: 12px;
@@ -52,13 +50,8 @@ loadLetters();
     z-index: 9999;
     opacity: 1;
   }
-  #time span {
-    color: white;
-    transition: color 5s ease;
-  }
-  .time-change {
-    color: #FFC700 !important;
-  }
+  #time span { color: white; transition: color 5s ease; }
+  .time-change { color: #FFC700 !important; }
 </style>
 </head>
 <body>
