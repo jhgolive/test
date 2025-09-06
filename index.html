@@ -300,6 +300,10 @@ const lettersCol = collection(db, "letters");
   .typing {
     position: relative;
   }
+  .typing, #time {
+    display: inline-block; /* 옆에 나란히 */
+    vertical-align: middle; /* 서로 세로 중앙 정렬 */
+  }
   .brick {
     position: absolute;
     width: 12px;
@@ -338,5 +342,6 @@ const lettersCol = collection(db, "letters");
   </table>
 </body>
 </html>
+
 
 
