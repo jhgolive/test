@@ -52,8 +52,8 @@ const wordListCol = collection(db, "wordList");
         color: data.color    // "red" | "#FFC700" | "#6495ED"
       });
     });
-  
-    console.log("wordList 불러옴:", wordList);
+    wordList.push({ words: ["ㅡ"], color: "transparent" });
+    //console.log("wordList 불러옴:", wordList);
   }
     
   async function typing() {
@@ -358,6 +358,7 @@ const wordListCol = collection(db, "wordList");
   </table>
 </body>
 </html>
+
 
 
 
