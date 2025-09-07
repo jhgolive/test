@@ -25,8 +25,6 @@ const wordListCol = collection(db, "wordList");
   let typingLoopActive = true;
   let animationFrameId = null; // 1. 애니메이션 프레임 ID 저장용
 
-  let wordList = []; // ✅ 전역 배열
-
   window.onload = function () {
     time();
     typing();
@@ -46,7 +44,9 @@ const wordListCol = collection(db, "wordList");
   async function loadWordList() {
     const q = query(wordListCol, orderBy("timestamp", "asc"));
     const snapshot = await getDocs(q);
-  
+
+    let wordList = []; // ✅ 전역 배열
+    
     wordList = []; // 초기화
     snapshot.forEach(doc => {
       const data = doc.data();
@@ -357,6 +357,7 @@ const wordListCol = collection(db, "wordList");
   </table>
 </body>
 </html>
+
 
 
 
