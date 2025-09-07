@@ -29,7 +29,7 @@ const wordListCol = collection(db, "wordList");
 
   window.onload = function () {
     time();
-    await loadWordList();
+    
     typing();
   };
 
@@ -39,10 +39,6 @@ const wordListCol = collection(db, "wordList");
     const letters = snapshot.docs.map(doc => doc.data().text);
     return letters;
   }
-    
-  async function typing() {
-    const $text = document.querySelector(".typing .text");
-    const letters = await fetchLetters(); // 서버에서 불러오기
 
   async function loadWordList() {
     const q = query(wordListCol, orderBy("timestamp", "asc"));
@@ -59,6 +55,10 @@ const wordListCol = collection(db, "wordList");
   
     console.log("wordList 불러옴:", wordList);
   }
+    
+  async function typing() {
+    const $text = document.querySelector(".typing .text");
+    const letters = await fetchLetters(); // 서버에서 불러오기
 
     //const wordList = [
       //{ words: ["L", "후원", "구독", "감사", "다시", "YOON", "٩", "و"], color: "red" }, // 빨강
@@ -358,6 +358,7 @@ const wordListCol = collection(db, "wordList");
   </table>
 </body>
 </html>
+
 
 
 
