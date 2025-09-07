@@ -27,7 +27,7 @@ const wordListCol = collection(db, "wordList");
 
   let wordList = []; // ✅ 전역 배열
 
-  window.onload = function () {
+  window.onload = async function () {
     time();
     await loadWordList();
     typing();
@@ -358,6 +358,7 @@ const wordListCol = collection(db, "wordList");
   </table>
 </body>
 </html>
+
 
 
 
