@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html>
+<html lang="ko">
 <head>
 <meta charset="utf-8">
 <title>GPS 업로드</title>
@@ -28,7 +28,7 @@ body {
   margin: 15px 0; 
 }
 
-/* 버튼 행 */
+/* 버튼 행 (카드 스타일) */
 .btn-row {
   display: flex;
   align-items: center;
@@ -39,7 +39,7 @@ body {
   padding: 10px;
   border-radius: 8px;
   border: 2px solid #0a84ff;
-  width: 45ch;          /* 고정 폭 (텍스트 관리 페이지 스타일) */
+  width: 45ch;          /* PC에서 고정 폭 */
   margin-left: auto;
   margin-right: auto;
   box-sizing: border-box;
@@ -73,7 +73,7 @@ button.active {
 /* 모바일 화면 대응 */
 @media (max-width: 480px) {
   .btn-row {
-    width: 42ch; /* 모바일에서는 약간 줄이기 */
+    width: 42ch; /* 모바일에서는 조금 줄임 */
   }
   button {
     font-size: 16px;
@@ -81,6 +81,251 @@ button.active {
   }
 }
 </style>
+
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/12.1.0/firebase-app.js";
+import { getDatabase, ref, set } from "https://www.gstatic.com/firebasejs/12.1.0/firebase-database.js";
+
+const firebaseConfig = {
+  apiKey: "AIzaSyAQGtOEcxFxl9FV7NASLgxLDc23u2vzS_0",
+  authDomain: "mygps-11798.firebaseapp.com",
+  databaseURL: "https://mygps-11798-default-rtdb.asia-southeast1.firebasedatabase.app",
+  projectId: "mygps-11798",
+  storageBucket: "mygps-11798.firebasedestorage.app",
+  messagingSenderId: "271371741627",
+  appId: "1:271371741627:web:642901f43c5ad57d80bc9e"
+};
+
+const app = initializeApp(firebaseConfig);
+const db = getDatabase(app);
+
+/* 전역 변수 */
+window.mapLevel = 4;
+window.borderRadius = 0;
+window.mapOpacity = 1;
+window.mapSize = 200;
+
+let prevPos = null;
+
+/* 실제 거리 계산 (미터 단위) */
+function distanceMeters(lat1, lon1, lat2, lon2) {
+  const R = 6371000;
+  const toRad = x => x * Math.PI / 180;
+  const dLat = toRad(lat2 - lat1);
+  const dLon = toRad(lon2 - lon1);
+  const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
+            Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) *
+            Math.sin(dLon/2) * Math.sin(dLon/2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+  return R * c;
+}
+
+const MIN_MOVE_METERS = 5;
+
+/* GPS 위치 업로드 */
+function uploadLocation(lat, lng) {
+  set(ref(db, "location/current"), {
+    lat,
+    lng,
+    timestamp: Date.now()
+  });
+}
+
+/* 버튼 값 업로드 (3초 throttle) */
+let pendingButtonData = null;
+let lastButtonUploadTime = 0;
+const BUTTON_UPLOAD_INTERVAL = 3000;
+
+function uploadButtonValues() {
+  const now = Date.now();
+  if (!pendingButtonData) return;
+  if (now - lastButtonUploadTime >= BUTTON_UPLOAD_INTERVAL) {
+    set(ref(db, "location/buttonValues"), {
+      ...pendingButtonData
+    });
+    lastButtonUploadTime = now;
+    pendingButtonData = null;
+  } else {
+    setTimeout(uploadButtonValues, BUTTON_UPLOAD_INTERVAL - (now - lastButtonUploadTime));
+  }
+}
+
+function scheduleButtonUpload(newData) {
+  pendingButtonData = { ...newData };
+  uploadButtonValues();
+}
+
+/* 모드 전환 */
+let modeIndex = 1;
+function toggleMode(isLeftButton) {
+  if (isLeftButton) {
+    if (modeIndex > 0) modeIndex--;
+  } else {
+    if (modeIndex < 2) modeIndex++;
+  }
+  document.getElementById("mode-label").textContent = modeIndex;
+  set(ref(db, "location/settings/mode"), modeIndex);
+}
+
+/* 경로 모드 전환 */
+let routemodeIndex = 0;
+function togglerouteMode(isLeftButton) {
+  if (isLeftButton) {
+    if (routemodeIndex > 0) routemodeIndex--;
+  } else {
+    if (routemodeIndex < 2) routemodeIndex++;
+  }
+  document.getElementById("route-label").textContent = routemodeIndex;
+  set(ref(db, "location/settings/routeMode"), routemodeIndex);
+}
+
+window.onload = function() {
+  const zoomInBtn = document.getElementById('zoom-in');
+  const zoomOutBtn = document.getElementById('zoom-out');
+  const rounderInBtn = document.getElementById('rounder-in');
+  const rounderOutBtn = document.getElementById('rounder-out');
+  const opacityUpBtn = document.getElementById('opacityUp');
+  const opacityDownBtn = document.getElementById('opacityDown');
+  const sizeUpBtn = document.getElementById('size-up');
+  const sizeDownBtn = document.getElementById('size-down');
+
+  const darkOffBtn = document.getElementById("dark-off");
+  const darkOnBtn = document.getElementById("dark-on");
+
+  const opacityLabel = document.getElementById('opacity-label');
+  const radiusLabel = document.getElementById('radius-label');
+  const levelLabel = document.getElementById('level-label');
+  const sizeLabel = document.getElementById('size-label');
+
+  const routeStandardBtn = document.getElementById("route-standard");
+  const routeStraightBtn = document.getElementById("route-straight");
+
+  function updateDisplays() {
+    opacityLabel.textContent = window.mapOpacity.toFixed(2);
+    radiusLabel.textContent = window.borderRadius;
+    levelLabel.textContent = window.mapLevel;
+    sizeLabel.textContent = window.mapSize;
+  }
+  updateDisplays();
+
+  // 초기 Firebase 업로드
+  scheduleButtonUpload({
+    opacity: window.mapOpacity,
+    borderRadius: window.borderRadius,
+    mapLevel: window.mapLevel,
+    mapSize: window.mapSize
+  });
+  set(ref(db, "location/settings/mode"), modeIndex);
+  set(ref(db, "location/settings/routeMode"), routemodeIndex);
+
+  const intervalDelay = 150;
+  const startDelay = 500;
+  const zoomIncrement = 1;
+  const radiusIncrement = 10;
+  const opacityIncrement = 0.05;
+  const sizeIncrement = 20;
+
+  function changeOpacity(delta) {
+    window.mapOpacity = Math.min(1, Math.max(0.1, window.mapOpacity + delta));
+    updateDisplays();
+    scheduleButtonUpload({ opacity: window.mapOpacity, borderRadius: window.borderRadius, mapLevel: window.mapLevel, mapSize: window.mapSize });
+  }
+  function changeRadius(delta) {
+    window.borderRadius = Math.min(300, Math.max(0, window.borderRadius + delta));
+    updateDisplays();
+    scheduleButtonUpload({ opacity: window.mapOpacity, borderRadius: window.borderRadius, mapLevel: window.mapLevel, mapSize: window.mapSize });
+  }
+  function changeZoom(delta) {
+    window.mapLevel = Math.min(14, Math.max(1, window.mapLevel + delta));
+    updateDisplays();
+    scheduleButtonUpload({ opacity: window.mapOpacity, borderRadius: window.borderRadius, mapLevel: window.mapLevel, mapSize: window.mapSize });
+  }
+  function changeMapSize(delta) {
+    window.mapSize = Math.min(600, Math.max(100, window.mapSize + delta));
+    updateDisplays();
+    scheduleButtonUpload({ opacity: window.mapOpacity, borderRadius: window.borderRadius, mapLevel: window.mapLevel, mapSize: window.mapSize });
+  }
+
+  function addHoldEvent(button, delta, func) {
+    let interval = null;
+    let timeout = null;
+    let longPress = false;
+    const startChange = () => {
+      longPress = true;
+      interval = setInterval(() => func(delta), intervalDelay);
+    };
+    button.addEventListener('mousedown', () => {
+      button.classList.add('active');
+      longPress = false;
+      timeout = setTimeout(startChange, startDelay);
+    });
+    button.addEventListener('mouseup', () => {
+      button.classList.remove('active');
+      clearTimeout(timeout);
+      clearInterval(interval);
+      if (!longPress) func(delta);
+    });
+    button.addEventListener('mouseleave', () => {
+      button.classList.remove('active');
+      clearTimeout(timeout);
+      clearInterval(interval);
+    });
+    button.addEventListener('touchstart', (e) => {
+      e.preventDefault();
+      button.classList.add('active');
+      longPress = false;
+      timeout = setTimeout(startChange, startDelay);
+    });
+    button.addEventListener('touchend', () => {
+      button.classList.remove('active');
+      clearTimeout(timeout);
+      clearInterval(interval);
+      if (!longPress) func(delta);
+    });
+    button.addEventListener('touchcancel', () => {
+      button.classList.remove('active');
+      clearTimeout(timeout);
+      clearInterval(interval);
+    });
+  }
+
+  addHoldEvent(opacityUpBtn, opacityIncrement, changeOpacity);
+  addHoldEvent(opacityDownBtn, -opacityIncrement, changeOpacity);
+  addHoldEvent(rounderInBtn, radiusIncrement, changeRadius);
+  addHoldEvent(rounderOutBtn, -radiusIncrement, changeRadius);
+  addHoldEvent(zoomInBtn, zoomIncrement, changeZoom);
+  addHoldEvent(zoomOutBtn, -zoomIncrement, changeZoom);
+  addHoldEvent(sizeUpBtn, sizeIncrement, changeMapSize);
+  addHoldEvent(sizeDownBtn, -sizeIncrement, changeMapSize);
+  
+  addHoldEvent(darkOffBtn, null, () => toggleMode(true));
+  addHoldEvent(darkOnBtn, null, () => toggleMode(false));
+  addHoldEvent(routeStraightBtn, null, () => togglerouteMode(true));
+  addHoldEvent(routeStandardBtn, null, () => togglerouteMode(false));
+
+  /* GPS 시작 */
+  if (navigator.geolocation) {
+    navigator.geolocation.watchPosition(
+      (pos) => {
+        if (prevPos) {
+          const moveDist = distanceMeters(prevPos.lat, prevPos.lng, pos.coords.latitude, pos.coords.longitude);
+          if (moveDist >= MIN_MOVE_METERS) {
+            prevPos = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+            uploadLocation(pos.coords.latitude, pos.coords.longitude);
+          }
+        } else {
+          prevPos = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+          uploadLocation(pos.coords.latitude, pos.coords.longitude);
+        }
+      },
+      (err) => console.error(err),
+      { enableHighAccuracy: true }
+    );
+  } else {
+    alert("GPS를 지원하지 않는 기기입니다.");
+  }
+};
+</script>
 </head>
 
 <body>
