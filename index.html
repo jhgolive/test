@@ -29,7 +29,7 @@ const wordListCol = collection(db, "wordList");
 
   window.onload = function () {
     time();
-    
+    await loadWordList();
     typing();
   };
 
@@ -358,6 +358,7 @@ const wordListCol = collection(db, "wordList");
   </table>
 </body>
 </html>
+
 
 
 
